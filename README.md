@@ -167,7 +167,7 @@ required to set up a WSL distribution prior to invoking the `sbom-action`, for
 example, you can add the small Alpine image:
 
 ```yaml
-- uses: Vampire/setup-wsl@v1
+- uses: Vampire/setup-wsl@v2
   with:
     distribution: Alpine
 ```
