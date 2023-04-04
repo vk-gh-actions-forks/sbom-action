@@ -245,6 +245,29 @@ export function getSbomFormat(): SyftOptions["format"] {
 }
 
 /**
+ * Returns the SHA of the current commit, which will either be the head
+ * of the pull request branch or the value of github.context.sha, depending
+ * on the event type.
+ */
+export function getSha(): string {
+  const pull_request_events = [
+    "pull_request",
+    "pull_request_comment",
+    "pull_request_review",
+    "pull_request_review_comment",
+    // Note that pull_request_target is omitted here.
+    // That event runs in the context of the base commit of the PR,
+    // so the snapshot should not be associated with the head commit.
+  ];
+  if (pull_request_events.includes(github.context.eventName)) {
+    const pr = (github.context.payload as PullRequestEvent).pull_request;
+    return pr.head.sha;
+  } else {
+    return github.context.sha;
+  }
+}
+
+/**
  * Uploads a SBOM as a workflow artifact
  * @param contents SBOM file contents
  */
@@ -257,6 +280,8 @@ export async function uploadSbomArtifact(contents: string): Promise<void> {
   const filePath = `${tempDir}/${fileName}`;
   fs.writeFileSync(filePath, contents);
 
+  const retentionDays = parseInt(core.getInput("upload-artifact-retention"));
+
   const outputFile = core.getInput("output-file");
   if (outputFile) {
     fs.copyFileSync(filePath, outputFile);
@@ -268,6 +293,7 @@ export async function uploadSbomArtifact(contents: string): Promise<void> {
   await client.uploadWorkflowArtifact({
     file: filePath,
     name: fileName,
+    retention: retentionDays,
   });
 }
 
@@ -382,7 +408,8 @@ export async function uploadDependencySnapshot(): Promise<void> {
     );
     return;
   }
-  const { workflow, job, runId, repo, sha, ref } = github.context;
+  const { workflow, job, runId, repo, ref } = github.context;
+  const sha = getSha();
   const client = getClient(repo, core.getInput("github-token"));
 
   const snapshot = JSON.parse(

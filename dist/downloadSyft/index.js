@@ -6552,6 +6552,10 @@ function checkBypass(reqUrl) {
     if (!reqUrl.hostname) {
         return false;
     }
+    const reqHost = reqUrl.hostname;
+    if (isLoopbackAddress(reqHost)) {
+        return true;
+    }
     const noProxy = process.env['no_proxy'] || process.env['NO_PROXY'] || '';
     if (!noProxy) {
         return false;
@@ -6577,13 +6581,24 @@ function checkBypass(reqUrl) {
         .split(',')
         .map(x => x.trim().toUpperCase())
         .filter(x => x)) {
-        if (upperReqHosts.some(x => x === upperNoProxyItem)) {
+        if (upperNoProxyItem === '*' ||
+            upperReqHosts.some(x => x === upperNoProxyItem ||
+                x.endsWith(`.${upperNoProxyItem}`) ||
+                (upperNoProxyItem.startsWith('.') &&
+                    x.endsWith(`${upperNoProxyItem}`)))) {
             return true;
         }
     }
     return false;
 }
 exports.checkBypass = checkBypass;
+function isLoopbackAddress(host) {
+    const hostLower = host.toLowerCase();
+    return (hostLower === 'localhost' ||
+        hostLower.startsWith('127.') ||
+        hostLower.startsWith('[::1]') ||
+        hostLower.startsWith('[0:0:0:0:0:0:0:1]'));
+}
 //# sourceMappingURL=proxy.js.map
 
 /***/ }),
@@ -23370,7 +23385,7 @@ function wrappy (fn, cb) {
 
 Object.defineProperty(exports, "__esModule", ({ value: true }));
 exports.VERSION = void 0;
-exports.VERSION = "v0.69.1";
+exports.VERSION = "v0.76.0";
 
 
 /***/ }),
@@ -23652,17 +23667,20 @@ class GithubClient {
      * Uploads a workflow artifact for the current workflow run
      * @param name name of the artifact
      * @param file file to upload
+     * @param retention retention days of a artifact
      */
-    uploadWorkflowArtifact({ name, file, }) {
+    uploadWorkflowArtifact({ name, file, retention, }) {
         return __awaiter(this, void 0, void 0, function* () {
             const rootDirectory = path_1.default.dirname(file);
             const client = (0, artifact_1.create)();
-            debugLog("uploadArtifact:", name, file, rootDirectory, core.isDebug() && fs_1.default.readdirSync(rootDirectory));
-            const info = yield suppressOutput(() => __awaiter(this, void 0, void 0, function* () {
-                return client.uploadArtifact(name, [file], rootDirectory, {
-                    continueOnError: false,
-                });
-            }));
+            debugLog("uploadArtifact:", name, file, retention, rootDirectory, core.isDebug() && fs_1.default.readdirSync(rootDirectory));
+            const options = {
+                continueOnError: false,
+            };
+            if (retention) {
+                options.retentionDays = retention;
+            }
+            const info = yield suppressOutput(() => __awaiter(this, void 0, void 0, function* () { return client.uploadArtifact(name, [file], rootDirectory, options); }));
             debugLog("uploadArtifact response:", info);
         });
     }
@@ -23976,7 +23994,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", ({ value: true }));
-exports.runAndFailBuildOnException = exports.attachReleaseAssets = exports.uploadDependencySnapshot = exports.runSyftAction = exports.uploadSbomArtifact = exports.getSbomFormat = exports.getSyftCommand = exports.downloadSyft = exports.getArtifactName = exports.SYFT_VERSION = exports.SYFT_BINARY_NAME = void 0;
+exports.runAndFailBuildOnException = exports.attachReleaseAssets = exports.uploadDependencySnapshot = exports.runSyftAction = exports.uploadSbomArtifact = exports.getSha = exports.getSbomFormat = exports.getSyftCommand = exports.downloadSyft = exports.getArtifactName = exports.SYFT_VERSION = exports.SYFT_BINARY_NAME = void 0;
 const core = __importStar(__nccwpck_require__(2186));
 const github = __importStar(__nccwpck_require__(5438));
 const cache = __importStar(__nccwpck_require__(7784));
@@ -24184,6 +24202,30 @@ function getSbomFormat() {
 }
 exports.getSbomFormat = getSbomFormat;
 /**
+ * Returns the SHA of the current commit, which will either be the head
+ * of the pull request branch or the value of github.context.sha, depending
+ * on the event type.
+ */
+function getSha() {
+    const pull_request_events = [
+        "pull_request",
+        "pull_request_comment",
+        "pull_request_review",
+        "pull_request_review_comment",
+        // Note that pull_request_target is omitted here.
+        // That event runs in the context of the base commit of the PR,
+        // so the snapshot should not be associated with the head commit.
+    ];
+    if (pull_request_events.includes(github.context.eventName)) {
+        const pr = github.context.payload.pull_request;
+        return pr.head.sha;
+    }
+    else {
+        return github.context.sha;
+    }
+}
+exports.getSha = getSha;
+/**
  * Uploads a SBOM as a workflow artifact
  * @param contents SBOM file contents
  */
@@ -24194,6 +24236,7 @@ function uploadSbomArtifact(contents) {
         const fileName = getArtifactName();
         const filePath = `${tempDir}/${fileName}`;
         fs.writeFileSync(filePath, contents);
+        const retentionDays = parseInt(core.getInput("upload-artifact-retention"));
         const outputFile = core.getInput("output-file");
         if (outputFile) {
             fs.copyFileSync(filePath, outputFile);
@@ -24203,6 +24246,7 @@ function uploadSbomArtifact(contents) {
         yield client.uploadWorkflowArtifact({
             file: filePath,
             name: fileName,
+            retention: retentionDays,
         });
     });
 }
@@ -24301,7 +24345,8 @@ function uploadDependencySnapshot() {
             core.warning(`No dependency snapshot found at '${githubDependencySnapshotFile}'`);
             return;
         }
-        const { workflow, job, runId, repo, sha, ref } = github.context;
+        const { workflow, job, runId, repo, ref } = github.context;
+        const sha = getSha();
         const client = (0, GithubClient_1.getClient)(repo, core.getInput("github-token"));
         const snapshot = JSON.parse(fs.readFileSync(githubDependencySnapshotFile).toString("utf8"));
         // Need to add the job and repo details
