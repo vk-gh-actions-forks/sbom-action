@@ -43,13 +43,13 @@
     "@octokit/core": "^4.2.0",
     "@octokit/webhooks": "^10.7.0",
     "fast-safe-stringify": "^2.1.1",
-    "npm-check-updates": "^16.9.0"
+    "npm-check-updates": "^17.0.0"
   },
   "devDependencies": {
     "@octokit/webhooks-types": "^6.10.0",
     "@types/jest": "^29.5.0",
     "@types/node": "^18.15.11",
-    "@typescript-eslint/eslint-plugin": "^5.57.0",
+    "@typescript-eslint/eslint-plugin": "^6.1.0",
     "@typescript-eslint/parser": "^5.57.0",
     "@vercel/ncc": "^0.36.1",
     "eol-converter-cli": "^1.0.8",
