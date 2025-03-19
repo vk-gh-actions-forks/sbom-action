@@ -1,11 +1,10 @@
 # GitHub Action for SBOM Generation
 
+**A GitHub Action for creating a software bill of materials (SBOM) using [Syft](https://github.com/anchore/syft).**
+
 [![GitHub release](https://img.shields.io/github/release/anchore/sbom-action.svg)](https://github.com/anchore/sbom-action/releases/latest)
 [![License: Apache-2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://github.com/anchore/sbom-action/blob/main/LICENSE)
-[![Slack Invite](https://img.shields.io/badge/Slack-Join-blue?logo=slack)](https://anchore.com/slack)
-
-A GitHub Action for creating a software bill of materials (SBOM)
-using [Syft](https://github.com/anchore/syft).
+[![Join our Discourse](https://img.shields.io/badge/Discourse-Join-blue?logo=discourse)](https://anchore.com/discourse)
 
 ## Basic Usage
 
@@ -17,6 +16,17 @@ By default, this action will execute a Syft scan in the workspace directory
 and upload a workflow artifact SBOM in SPDX format. It will also detect
 if being run during a [GitHub release](https://docs.github.com/en/repositories/releasing-projects-on-github/about-releases)
 and upload the SBOM as a release asset.
+
+> [!IMPORTANT]
+> To upload the SBOM to releases, you will need to give the action permission to read the artifact from the action, and write it to the release:
+> ```yaml
+> jobs:
+>  build:
+>    permissions:
+>      actions: read
+>      contents: write
+>    steps:
+> ```
 
 ## Example Usage
 
@@ -116,6 +126,27 @@ use the `artifact-name` parameter:
     artifact-name: sbom.spdx
 ```
 
+> [!IMPORTANT]  
+> If using this action within a **matrix build**, you must specify a unique `artifact-name`
+> based on matrix parameters or the artifact upload will fail due to duplicate names. See
+> an [example here](.github/workflows/test.yml#L36).
+
+## Permissions
+
+This action needs the following permissions, depending on how it is being used:
+
+```
+contents: write # for sbom-action artifact uploads
+```
+
+If attaching release assets, the `actions: read` permission is also required.
+This may be implicit for public repositories, but is likely to be necessary for
+private repositories.
+
+```
+actions: read # to find workflow artifacts when attaching release assets
+```
+
 ## Configuration
 
 ### anchore/sbom-action
@@ -139,6 +170,7 @@ and uploading them as workflow artifacts and release assets.
 | `upload-release-assets`     | Upload release assets                                                                                                                                   | `true`                           |
 | `syft-version`              | The version of Syft to use                                                                                                                              |                                  |
 | `github-token`              | Authorized secret GitHub Personal Access Token.                                                                                                         | `github.token`                   |
+| `config `                   | Syft configuration file to use.                                                                                                                         |                                  |
 
 ### anchore/sbom-action/publish-sbom
 
@@ -167,15 +199,9 @@ Output parameters:
 
 ## Windows
 
-Windows is currently supported via Windows Subsystem for Linux (WSL). It is
-required to set up a WSL distribution prior to invoking the `sbom-action`, for
-example, you can add the small Alpine image:
-
-```yaml
-- uses: Vampire/setup-wsl@v2
-  with:
-    distribution: Alpine
-```
+This action is tested on Windows, and should work natively on Windows hosts
+without WSL. (Note that it previously required WSL, but should now be run
+natively on Windows.)
 
 ## Diagnostics
 

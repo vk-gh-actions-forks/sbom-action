@@ -14,9 +14,9 @@ import { SyftOptions } from "../Syft";
 import { VERSION } from "../SyftVersion";
 import { execute } from "./Executor";
 import {
+  DependencySnapshot,
   dashWrap,
   debugLog,
-  DependencySnapshot,
   getClient,
 } from "./GithubClient";
 import { downloadSyftFromZip } from "./SyftDownloader";
@@ -30,11 +30,13 @@ const PRIOR_ARTIFACT_ENV_VAR = "ANCHORE_SBOM_ACTION_PRIOR_ARTIFACT";
 const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "sbom-action-"));
 const githubDependencySnapshotFile = `${tempDir}/github.sbom.json`;
 
+const exeSuffix = process.platform == "win32" ? ".exe" : "";
+
 /**
  * Tries to get a unique artifact name or otherwise as appropriate as possible
  */
 export function getArtifactName(): string {
-  const fileName = core.getInput("artifact-name");
+  const fileName = getArtifactNameInput();
 
   // if there is an explicit filename just return it, this could cause issues
   // where earlier sboms are overwritten by later ones
@@ -71,7 +73,7 @@ export function getArtifactName(): string {
     if (parts.length > 2) {
       parts.splice(0, 1);
     }
-    const prefix = parts.join("-").replace(/[^-a-zA-Z0-9]/, "_");
+    const prefix = parts.join("-").replace(/[^-a-zA-Z0-9]/g, "_");
     return `${prefix}.${extension}`;
   }
 
@@ -92,6 +94,13 @@ export function getArtifactName(): string {
 }
 
 /**
+ * Returns the artifact-name input value
+ */
+function getArtifactNameInput() {
+  return core.getInput("artifact-name");
+}
+
+/**
  * Gets a reference to the syft command and executes the syft action
  * @param input syft input parameters
  * @param format syft output format
@@ -107,6 +116,7 @@ async function executeSyft({
   const cmd = await getSyftCommand();
 
   const env: { [key: string]: string } = {
+    ...process.env,
     SYFT_CHECK_FOR_APP_UPDATE: "false",
   };
 
@@ -125,7 +135,11 @@ async function executeSyft({
   }
 
   // https://github.com/anchore/syft#configuration
-  let args = ["packages", "-vv"];
+  let args = ["scan"];
+
+  if (core.isDebug()) {
+    args = [...args, "-vv"];
+  }
 
   if ("image" in input && input.image) {
     if (registryUser) {
@@ -133,10 +147,10 @@ async function executeSyft({
     } else {
       args = [...args, `${input.image}`];
     }
-  } else if ("path" in input && input.path) {
-    args = [...args, `dir:${input.path}`];
   } else if ("file" in input && input.file) {
     args = [...args, `file:${input.file}`];
+  } else if ("path" in input && input.path) {
+    args = [...args, `dir:${input.path}`];
   } else {
     throw new Error("Invalid input, no image or path specified");
   }
@@ -146,6 +160,10 @@ async function executeSyft({
   if (opts.uploadToDependencySnapshotAPI) {
     // generate github dependency format
     args = [...args, "-o", `github=${githubDependencySnapshotFile}`];
+  }
+
+  if (opts.configFile) {
+    args = [...args, "-c", opts.configFile];
   }
 
   // Execute in a group so the syft output is collapsed in the GitHub log
@@ -186,12 +204,28 @@ async function executeSyft({
   }
 }
 
+function isWindows(): boolean {
+  return process.platform == "win32";
+}
+
+async function downloadSyftWindowsWorkaround(version: string): Promise<string> {
+  const versionNoV = version.replace(/^v/, "");
+  const url = `https://github.com/anchore/syft/releases/download/${version}/syft_${versionNoV}_windows_amd64.zip`;
+  core.info(`Downloading syft from ${url}`);
+  const zipPath = await cache.downloadTool(url);
+  const toolDir = await cache.extractZip(zipPath);
+  return path.join(toolDir, `${SYFT_BINARY_NAME}${exeSuffix}`);
+}
+
 /**
  * Downloads the appropriate Syft binary for the platform
  */
 export async function downloadSyft(): Promise<string> {
   const name = SYFT_BINARY_NAME;
   const version = SYFT_VERSION;
+  if (isWindows()) {
+    return downloadSyftWindowsWorkaround(version);
+  }
 
   const url = `https://raw.githubusercontent.com/anchore/${name}/main/install.sh`;
 
@@ -200,19 +234,18 @@ export async function downloadSyft(): Promise<string> {
   // Download the installer, and run
   const installPath = await cache.downloadTool(url);
 
-  // Make sure the tool's executable bit is set
   const syftBinaryPath = `${installPath}_${name}`;
 
   await execute("sh", [installPath, "-d", "-b", syftBinaryPath, version]);
 
-  return `${syftBinaryPath}/${name}`;
+  return path.join(syftBinaryPath, name) + exeSuffix;
 }
 
 /**
  * Gets the Syft command to run via exec
  */
 export async function getSyftCommand(): Promise<string> {
-  const name = SYFT_BINARY_NAME;
+  const name = SYFT_BINARY_NAME + exeSuffix;
   const version = SYFT_VERSION;
 
   const sourceSyft = await downloadSyftFromZip(version);
@@ -281,11 +314,6 @@ export async function uploadSbomArtifact(contents: string): Promise<void> {
   fs.writeFileSync(filePath, contents);
 
   const retentionDays = parseInt(core.getInput("upload-artifact-retention"));
-
-  const outputFile = core.getInput("output-file");
-  if (outputFile) {
-    fs.copyFileSync(filePath, outputFile);
-  }
 
   core.info(dashWrap("Uploading workflow artifacts"));
   core.info(filePath);
@@ -370,6 +398,7 @@ export async function runSyftAction(): Promise<void> {
     },
     format: getSbomFormat(),
     uploadToDependencySnapshotAPI: uploadToSnapshotAPI(),
+    configFile: core.getInput("config"),
   });
 
   core.info(`SBOM scan completed in: ${(Date.now() - start) / 1000}s`);
@@ -382,6 +411,11 @@ export async function runSyftAction(): Promise<void> {
     const priorArtifact = process.env[PRIOR_ARTIFACT_ENV_VAR];
     if (priorArtifact) {
       core.debug(`Prior artifact: ${priorArtifact}`);
+    }
+
+    const outputFile = core.getInput("output-file");
+    if (outputFile) {
+      fs.writeFileSync(outputFile, output);
     }
 
     if (doUpload) {
@@ -416,10 +450,19 @@ export async function uploadDependencySnapshot(): Promise<void> {
     fs.readFileSync(githubDependencySnapshotFile).toString("utf8")
   ) as DependencySnapshot;
 
+  let correlator = `${workflow}_${job}`;
+  // if running in a matrix build, it is not possible to determine a unique value,
+  // so a user must explicitly specify the artifact-name input, there isn't any
+  // other indicator of being run within a matrix build, so we must use that
+  // here in order to properly correlate dependency snapshots
+  const artifactInput = getArtifactNameInput();
+  if (artifactInput) {
+    correlator += `_${artifactInput}`;
+  }
+
   // Need to add the job and repo details
   snapshot.job = {
-    correlator:
-      core.getInput("dependency-snapshot-correlator") || `${workflow}_${job}`,
+    correlator: core.getInput("dependency-snapshot-correlator") || correlator,
     id: `${runId}`,
   };
   snapshot.sha = sha;
@@ -473,7 +516,7 @@ export async function attachReleaseAssets(): Promise<void> {
     const sbomArtifactPattern = sbomArtifactInput || `^${getArtifactName()}$`;
     const matcher = new RegExp(sbomArtifactPattern);
 
-    const artifacts = await client.listWorkflowArtifacts();
+    const artifacts = await client.listCurrentWorkflowArtifacts();
     let matched = artifacts.filter((a) => {
       const matches = matcher.test(a.name);
       if (matches) {

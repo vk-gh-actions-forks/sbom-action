@@ -65,8 +65,8 @@ describe("Action", () => {
     const { args } = data.execArgs;
 
     expect(args).toBeDefined()
-    expect(args.length > 2).toBeTruthy();
-    expect(args[2]).toBe("some-image:latest")
+    expect(args.length > 1).toBeTruthy();
+    expect(args[1]).toBe("some-image:latest")
   });
 
   it("runs with path input", async () => {
@@ -81,8 +81,8 @@ describe("Action", () => {
     const { args } = data.execArgs;
 
     expect(args).toBeDefined()
-    expect(args.length > 2).toBeTruthy();
-    expect(args[2]).toBe("dir:some-path")
+    expect(args.length > 1).toBeTruthy();
+    expect(args[1]).toBe("dir:some-path")
   });
 
   it("runs with file input", async () => {
@@ -97,8 +97,8 @@ describe("Action", () => {
     const { args } = data.execArgs;
 
     expect(args).toBeDefined()
-    expect(args.length > 2).toBeTruthy();
-    expect(args[2]).toBe("file:some-file.jar")
+    expect(args.length > 1).toBeTruthy();
+    expect(args[1]).toBe("file:some-file.jar")
   });
 
   it("runs with release uploads inputs", async () => {
@@ -197,7 +197,7 @@ describe("Action", () => {
       artifacts: [{
         runId: 6,
         name: "sbom.spdx.json",
-        file: "the_sbom",
+        files: ["the_sbom"],
       }],
     });
 
@@ -385,11 +385,37 @@ describe("Action", () => {
     });
 
     expect(action.getArtifactName()).toBe("img.cyclonedx.json");
+
+  });
+
+  it("correctly encode tags", () => {
+    setData({
+      inputs: {
+        image: "ghcr.io/something-something/image-image:0.1.2-dev"
+      }
+    });
+
+    expect(action.getArtifactName()).toBe("something-something-image-image_0_1_2-dev.spdx.json");
   });
 
   it ("properly maps paths for WSL", () => {
     expect(mapToWSLPath("basic arg")).toBe("basic arg");
     expect(mapToWSLPath("D:\\Some\\Path")).toBe("/mnt/d/Some/Path");
     expect(mapToWSLPath("C:\\Some\\Path")).toBe("/mnt/c/Some/Path");
+  });
+
+  it("calls with config", async () => {
+    setData({
+      inputs: {
+        image: "some-image:latest",
+        config: "syft-config.yaml",
+      }
+    });
+
+    await action.runSyftAction();
+    const { cmd, args, env } = data.execArgs;
+
+    expect(args).toContain("-c");
+    expect(args).toContain("syft-config.yaml");
   });
 });
