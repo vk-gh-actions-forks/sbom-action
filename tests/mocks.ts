@@ -1,16 +1,32 @@
+import test from "node:test";
 import {
   DownloadArtifactOptions,
   DownloadArtifactResponse,
   FindOptions,
-  ListArtifactsResponse,
   UploadArtifactOptions,
   UploadArtifactResponse
 } from "@actions/artifact";
 
+type testType = typeof test;
+
 /**
  * Get all the mocks and mock data
  */
-export function getMocks() {
+export function getMocks(test: testType) {
+  const originalEnv = process.env;
+
+  test.before(() => {
+    process.env = {
+      ...process.env,
+      "RUNNER_TOOL_CACHE": "/tmp/actions/cache",
+      "RUNNER_TEMP": "/tmp/actions/temp",
+    }
+  });
+
+  test.after(() => {
+    process.env = originalEnv;
+  });
+
   class Data {
     artifacts: Partial<(Artifact & { runId: number, id: number, files: string[] })>[] = [];
 
@@ -48,6 +64,8 @@ export function getMocks() {
       enabled: false,
       log: [],
     }
+
+    downloadedUrls: string[] = [];
   }
 
   const data = Object.freeze(new Data());
@@ -159,7 +177,7 @@ export function getMocks() {
               artifacts: data.artifacts.filter(a => !a.runId),
             };
           },
-          getArtifact(artifactName: string, options?: FindOptions) {
+          getArtifact(artifactName: string) { // , options?: FindOptions) {
             return {
               artifact: data.artifacts.find(a => a.name == artifactName)
             }
@@ -168,7 +186,8 @@ export function getMocks() {
       },
 
       "@actions/tool-cache": () => ({
-        downloadTool() {
+        downloadTool(url: string) {
+          data.downloadedUrls.push(url);
           return "download-tool";
         },
         extractZip() {
@@ -308,10 +327,11 @@ export const context = {
 };
 
 import { PartialDeep } from "type-fest";
-import { Artifact } from "../src/github/GithubClient";
-import { ExecOptions } from "@actions/exec";
-import { Context } from "@actions/github/lib/context";
-import {
+import type { Artifact } from "../src/github/GithubClient";
+import type { ExecOptions } from "@actions/exec";
+import type { context as _ghContext } from "@actions/github";
+type Context = typeof _ghContext;
+import type {
   PullRequestEvent, PushEvent,
   Release,
   ReleaseAsset, ReleaseEvent,

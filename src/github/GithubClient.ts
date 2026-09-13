@@ -8,6 +8,7 @@ import fs from "fs";
 import os from "os";
 import path from "path";
 import { stringify } from "./Util";
+import { group } from "@actions/core";
 
 export type GithubRepo = { owner: string; repo: string };
 
@@ -56,28 +57,6 @@ export interface DependencySnapshot {
   detector: {
     version: string;
   };
-}
-
-/**
- * Suppress info output by redirecting to debug
- * @param fn function to call for duration of output suppression
- */
-async function suppressOutput<T>(fn: () => Promise<T>): Promise<T> {
-  const info = core.info;
-  try {
-    try {
-      // eslint-disable-next-line @typescript-eslint/ban-ts-comment
-      // @ts-ignore
-      core.info = core.debug;
-    } catch (e) {}
-    return await fn();
-  } finally {
-    try {
-      // eslint-disable-next-line @typescript-eslint/ban-ts-comment
-      // @ts-ignore
-      core.info = info;
-    } catch (e) {}
-  }
 }
 
 /**
@@ -157,7 +136,7 @@ export class GithubClient {
       return this.downloadWorkflowRunArtifact({ artifactId: id });
     }
     const tempPath = fs.mkdtempSync(path.join(os.tmpdir(), "sbom-action-"));
-    const response = await suppressOutput(async () => {
+    const response = await group("Artifact Upload", async () => {
       const response = await artifactClient.getArtifact(name);
       return await artifactClient.downloadArtifact(response.artifact.id, {
         path: tempPath,
@@ -173,7 +152,7 @@ export class GithubClient {
       "downloadArtifact response:",
       response,
       "dir:",
-      core.isDebug() && fs.readdirSync(response.downloadPath)
+      core.isDebug() && fs.readdirSync(response.downloadPath),
     );
 
     return `${response.downloadPath}`;
@@ -202,7 +181,7 @@ export class GithubClient {
       file,
       retention,
       rootDirectory,
-      core.isDebug() && fs.readdirSync(rootDirectory)
+      core.isDebug() && fs.readdirSync(rootDirectory),
     );
 
     const options: UploadArtifactOptions = {};
@@ -210,8 +189,8 @@ export class GithubClient {
       options.retentionDays = retention;
     }
 
-    const info = await suppressOutput(async () =>
-      artifactClient.uploadArtifact(name, [file], rootDirectory, options)
+    const info = await group("Artifact Upload", async () =>
+      artifactClient.uploadArtifact(name, [file], rootDirectory, options),
     );
 
     debugLog("uploadArtifact response:", info);
@@ -440,21 +419,22 @@ export class GithubClient {
             authorization: `token ${token}`,
           },
           data: JSON.stringify(snapshot),
-        }
+        },
       );
 
       if (response.status >= 400) {
         core.warning(
-          `Dependency snapshot upload failed: ${stringify(response)}`
+          `Dependency snapshot upload failed: ${stringify(response)}`,
         );
       } else {
         debugLog(`Dependency snapshot upload successful:`, response);
       }
     } catch (e: any) {
+      let v = e;
       if ("response" in e) {
-        e = e.response;
+        v = e.response;
       }
-      core.warning(`Error uploading depdendency snapshot: ${stringify(e)}`);
+      core.warning(`Error uploading depdendency snapshot: ${stringify(v)}`);
     }
   }
 }
@@ -475,7 +455,7 @@ export function getClient(repo: GithubRepo, githubToken: string): GithubClient {
       // @ts-ignore
       onRateLimit: (retryAfter, options) => {
         core.warning(
-          `Request quota exhausted for request ${options.method} ${options.url}`
+          `Request quota exhausted for request ${options.method} ${options.url}`,
         );
         if (options.request.retryCount === 0) {
           // only retries once
@@ -488,7 +468,7 @@ export function getClient(repo: GithubRepo, githubToken: string): GithubClient {
       onAbuseLimit: (retryAfter, options) => {
         // does not retry, only logs a warning
         core.warning(
-          `Abuse detected for request ${options.method} ${options.url}`
+          `Abuse detected for request ${options.method} ${options.url}`,
         );
       },
     },
