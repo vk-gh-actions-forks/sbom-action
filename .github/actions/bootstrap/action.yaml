@@ -12,12 +12,12 @@ runs:
   steps:
     # setup go, go-make, binny, and cache go modules (this is also what
     # restricts cache writes to the default branch, per audit guidance)
-    - uses: anchore/go-make/.github/actions/setup@27a9f35f41b5fe86d68815844efd2ba816e9ba6b # v0.9.1
+    - uses: anchore/go-make/.github/actions/setup@abf41688f36f2cbec13105747abbe8e60f5c56ca # v0.9.3
       with:
         cache-dependency-path: .make/go.sum
 
     - name: Setup node
-      uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
       with:
         node-version-file: package.json
         cache: npm
